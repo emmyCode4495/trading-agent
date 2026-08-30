@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Market Intelligence Agent</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0d10;
+    --panel: #10151a;
+    --panel-border: #212a31;
+    --amber: #ffb000;
+    --amber-dim: #8a6106;
+    --bull: #4fd1c5;
+    --bear: #ff6b5c;
+    --text: #e8e6e1;
+    --text-dim: #6b7480;
+    --text-mid: #9aa3ad;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+  }
+  .ticker {
+    background: #05070a;
+    border-bottom: 1px solid var(--panel-border);
+    padding: 8px 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+    position: relative;
+  }
+  .ticker-track {
+    display: inline-block;
+    white-space: nowrap;
+    will-change: transform;
+    animation: ticker-scroll 40s linear infinite;
+  }
+  .ticker:hover .ticker-track { animation-play-state: paused; }
+  @keyframes ticker-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  .ticker span { padding: 0 24px; }
+  .ticker .up { color: var(--bull); }
+  .ticker .down { color: var(--bear); }
+
+  .live-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    color: var(--text-dim); letter-spacing: 0.06em;
+  }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
+  .live-badge.on { color: var(--bull); }
+  .live-badge.on .live-dot { background: var(--bull); box-shadow: 0 0 6px var(--bull); animation: pulse 1.6s ease-in-out infinite; }
+  .live-badge.scanning { color: var(--amber); }
+  .live-badge.scanning .live-dot { background: var(--amber); box-shadow: 0 0 6px var(--amber); animation: pulse 0.8s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  header.top {
+    padding: 28px 32px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  header.top h1 {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: 0.02em;
+    margin: 0;
+    color: var(--amber);
+  }
+  header.top .sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  input, select, button {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: 2px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--amber-dim); color: var(--amber); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  input#manualSymbol { width: 130px; }
+
+  .controls-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .manual-lookup {
+    display: flex; gap: 6px; align-items: center;
+    border-left: 1px solid var(--panel-border);
+    padding-left: 12px; margin-left: 4px;
+  }
+  .manual-lookup .tag { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  main {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 20px;
+    padding: 20px 32px 60px;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 3px;
+    padding: 20px;
+  }
+  .panel + .panel { margin-top: 20px; }
+
+  .eyebrow {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0 0 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .eyebrow .timestamp { text-transform: none; letter-spacing: 0; color: var(--text-dim); }
+
+  /* --- Signature element: analog confidence gauge --- */
+  .gauge-wrap { display: flex; flex-direction: column; align-items: center; }
+  .gauge-value {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 34px;
+    margin-top: -8px;
+  }
+  .gauge-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .needle { transition: transform 1.1s cubic-bezier(.34,1.4,.4,1); transform-origin: 100px 100px; }
+
+  .badge-row { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+  .badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 2px;
+    border: 1px solid var(--panel-border);
+    color: var(--text-mid);
+  }
+  .badge.direction-LONG { color: var(--bull); border-color: var(--bull); }
+  .badge.direction-SHORT { color: var(--bear); border-color: var(--bear); }
+  .badge.direction-WAIT { color: var(--amber); border-color: var(--amber-dim); }
+
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; margin-top: 16px; }
+  .kv div:nth-child(odd) { color: var(--text-dim); }
+  .kv div:nth-child(even) { text-align: right; }
+
+  .report-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .report-head h2 { font-family: 'Space Mono', monospace; font-size: 22px; margin: 0; }
+  .report-head time { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-dim); }
+
+  .whatchanged { margin: 16px 0; font-size: 14px; line-height: 1.5; color: var(--text-mid); border-left: 2px solid var(--amber-dim); padding-left: 12px; }
+
+  ul.evidence { list-style: none; margin: 0; padding: 0; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; }
+  ul.evidence li { padding: 7px 0; border-bottom: 1px dashed var(--panel-border); color: var(--text-mid); }
+  ul.evidence li.against { color: var(--text-dim); }
+  ul.evidence li::before { content: "› "; color: var(--amber-dim); }
+
+  table { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--panel-border); color: var(--text-mid); }
+  th { color: var(--text-dim); font-weight: 500; text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; }
+  td.bull { color: var(--bull); }
+  td.bear { color: var(--bear); }
+  td.pnl-pos { color: var(--bull); font-weight: 600; }
+  td.pnl-neg { color: var(--bear); font-weight: 600; }
+
+  .status-pill {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 2px; letter-spacing: 0.06em;
+  }
+  .status-pill.open { color: var(--amber); border: 1px solid var(--amber-dim); }
+  .status-pill.win { color: var(--bull); border: 1px solid var(--bull); }
+  .status-pill.loss { color: var(--bear); border: 1px solid var(--bear); }
+  .status-pill.expired { color: var(--text-dim); border: 1px solid var(--panel-border); }
+
+  #opportunitiesTable tbody tr { cursor: pointer; }
+  #opportunitiesTable tbody tr:hover { background: rgba(255,176,0,0.06); }
+  #opportunitiesTable tbody tr.selected { background: rgba(255,176,0,0.12); }
+  #opportunitiesTable tbody tr.selected td { color: var(--amber); }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .stat { text-align: center; }
+  .stat .n { font-family: 'Space Mono', monospace; font-size: 26px; color: var(--amber); }
+  .stat .l { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
+
+  .loading { color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 40px 0; text-align: center; }
+  .empty-note { color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 12px 0; }
+</style>
+</head>
+<body>
+
+<div class="ticker"><div class="ticker-track" id="tickerTrack">Loading market feed…</div></div>
+
+<header class="top">
+  <div>
+    <h1>&#9679; MARKET INTELLIGENCE AGENT</h1>
+    <div class="sub">autonomous multi-agent scanner — discovers its own universe — not financial advice</div>
+  </div>
+  <div class="controls-row">
+    <span class="live-badge" id="liveBadge"><span class="live-dot"></span><span id="liveBadgeText">connecting…</span></span>
+    <button id="scanBtn">RUN SCAN</button>
+    <div class="manual-lookup">
+      <span class="tag">Manual lookup</span>
+      <input id="manualSymbol" type="text" placeholder="e.g. BTC/USDT" />
+      <button id="manualLookupBtn">Go</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div>
+    <div class="panel">
+      <p class="eyebrow">Scan universe<span class="timestamp" id="scanTimestamp">—</span></p>
+      <div class="stat-grid" id="scanStats">
+        <div class="stat"><div class="n">—</div><div class="l">Discovered</div></div>
+        <div class="stat"><div class="n">—</div><div class="l">Screened</div></div>
+        <div class="stat"><div class="n">—</div><div class="l">Analyzed</div></div>
+      </div>
+    </div>
+
+    <div class="panel gauge-wrap">
+      <p class="eyebrow" style="align-self:flex-start;">Confidence — <span id="gaugeSymbol">—</span></p>
+      <svg width="200" height="120" viewBox="0 0 200 120">
+        <path d="M 15 100 A 85 85 0 0 1 185 100" fill="none" stroke="#212a31" stroke-width="10" stroke-linecap="round"/>
+        <path id="gaugeArc" d="M 15 100 A 85 85 0 0 1 185 100" fill="none" stroke="#ffb000" stroke-width="10" stroke-linecap="round"
+              stroke-dasharray="267" stroke-dashoffset="267"/>
+        <line id="needle" class="needle" x1="100" y1="100" x2="100" y2="30" stroke="#e8e6e1" stroke-width="2"/>
+        <circle cx="100" cy="100" r="5" fill="#e8e6e1"/>
+      </svg>
+      <div class="gauge-value" id="confValue">—</div>
+      <div class="gauge-label">/ 100</div>
+
+      <div class="badge-row" id="badgeRow"></div>
+
+      <div class="kv" id="kvGrid"></div>
+    </div>
+
+    <div class="panel">
+      <p class="eyebrow">Backtest / Calibration <span class="timestamp">real-time win rate</span></p>
+      <div class="stat-grid" id="calStats">
+        <div class="stat"><div class="n">—</div><div class="l">Win rate</div></div>
+        <div class="stat"><div class="n">—</div><div class="l">Resolved</div></div>
+        <div class="stat"><div class="n">—</div><div class="l">Open</div></div>
+      </div>
+      <div class="kv" id="calAvgKv" style="margin-top:14px;"></div>
+    </div>
+
+    <div class="panel">
+      <p class="eyebrow">Live positions</p>
+      <table id="positionsTable">
+        <thead><tr><th>Symbol</th><th>Dir</th><th>Status</th><th>Entry</th><th>Now / Exit</th><th>P&amp;L</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-note" id="positionsEmpty" style="display:none;">No open or recently resolved positions yet.</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <p class="eyebrow">Opportunities — ranked by confidence, WAIT calls excluded</p>
+      <table id="opportunitiesTable">
+        <thead><tr><th>Symbol</th><th>Bias</th><th>Direction</th><th>Conf.</th><th>Regime</th><th>Risk</th><th>24h Δ</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-note" id="opportunitiesEmpty" style="display:none;">No actionable opportunities this cycle — every screened symbol came back WAIT. That's a valid outcome, not a bug.</div>
+    </div>
+
+    <div class="panel" id="reportPanel">
+      <div class="loading">Running initial scan…</div>
+    </div>
+
+    <div class="panel">
+      <p class="eyebrow">History — <span id="historySymbol">—</span></p>
+      <table id="historyTable">
+        <thead><tr><th>Time</th><th>Bias</th><th>Direction</th><th>Conf.</th><th>Status</th><th>P&amp;L</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+const API = "";
+let currentSymbol = null;
+let latestOpportunities = [];
+
+// Mirrors app/formatting.py's price_decimals logic, so the dashboard shows
+// the same sensible precision the backend already rounds to (2 decimals
+// for BTC-sized prices, more for sub-cent tokens) instead of raw JSON
+// floats or a fixed decimal count that looks wrong at very different
+// price scales.
+function formatPrice(price) {
+  if (price === null || price === undefined) return '—';
+  const abs = Math.abs(price);
+  let decimals;
+  if (abs === 0) decimals = 2;
+  else if (abs >= 1000) decimals = 2;
+  else if (abs >= 1) decimals = 4;
+  else if (abs >= 0.01) decimals = 6;
+  else decimals = 8;
+  return Number(price).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+function formatPct(pct) {
+  if (pct === null || pct === undefined) return '—';
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${pct.toFixed(2)}%`;
+}
+
+function setGauge(confidence) {
+  const circumference = 267;
+  const offset = circumference - (circumference * confidence / 100);
+  document.getElementById('gaugeArc').style.strokeDashoffset = offset;
+  document.getElementById('confValue').textContent = confidence;
+  const angle = -90 + (confidence / 100) * 180;
+  document.getElementById('needle').style.transform = `rotate(${angle}deg)`;
+}
+
+function renderReport(report) {
+  document.getElementById('gaugeSymbol').textContent = report.symbol;
+  setGauge(report.confidence);
+
+  document.getElementById('badgeRow').innerHTML = `
+    <span class="badge direction-${report.direction}">${report.direction}</span>
+    <span class="badge">${report.risk_level.toUpperCase()} RISK</span>
+  `;
+
+  document.getElementById('kvGrid').innerHTML = `
+    <div>Entry</div><div>${formatPrice(report.entry_price)}</div>
+    <div>Invalidation</div><div>${formatPrice(report.invalidation_price)}</div>
+    <div>Target</div><div>${formatPrice(report.target_price)}</div>
+  `;
+
+  const time = new Date(report.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  const evidenceHtml = report.evidence.map(e =>
+    `<li class="${e.startsWith('(against)') ? 'against' : ''}">${e}</li>`
+  ).join('');
+
+  document.getElementById('reportPanel').innerHTML = `
+    <div class="report-head">
+      <h2>${report.symbol}</h2>
+      <time>${time} — bias: ${report.bias}</time>
+    </div>
+    <div class="whatchanged">${report.what_changed}</div>
+    <p class="eyebrow">Evidence</p>
+    <ul class="evidence">${evidenceHtml}</ul>
+    <p class="eyebrow" style="margin-top:16px;">Do nothing if</p>
+    <p style="font-size:13px; color:var(--text-mid); margin:0;">${report.do_nothing_if}</p>
+  `;
+
+  document.getElementById('historySymbol').textContent = report.symbol;
+}
+
+function renderTicker(opportunities) {
+  const track = document.getElementById('tickerTrack');
+  let content;
+  if (!opportunities.length) {
+    content = '<span>Scan complete — no actionable opportunities this cycle.</span>';
+  } else {
+    content = opportunities.map(o => {
+      const cls = o.direction === 'LONG' ? 'up' : (o.direction === 'SHORT' ? 'down' : '');
+      return `<span class="${cls}">${o.symbol} · ${o.bias} · conf ${o.confidence}/100 · ${o.direction} · regime: ${o.market_regime}</span>`;
+    }).join('');
+  }
+
+  // Duplicate exactly once (not the old "repeat 3x static clip") so a 0 -> -50%
+  // transform loop is perfectly seamless: the second copy lines up exactly
+  // where the first one started, so the scroll never visibly jumps or resets.
+  track.innerHTML = content + content;
+
+  // Scale the animation duration to the track's actual width so the scroll
+  // speed feels consistent (px/sec) whether there are 2 opportunities or 15,
+  // instead of a fixed duration that'd race by or crawl depending on content.
+  requestAnimationFrame(() => {
+    const oneCopyWidth = track.scrollWidth / 2;
+    const pxPerSecond = 55;
+    const duration = Math.max(oneCopyWidth / pxPerSecond, 12);
+    track.style.animationDuration = `${duration}s`;
+  });
+}
+
+function renderScanStats(scan) {
+  document.getElementById('scanTimestamp').textContent =
+    scan.finished_at ? new Date(scan.finished_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '—';
+  document.getElementById('scanStats').innerHTML = `
+    <div class="stat"><div class="n">${scan.markets_discovered}</div><div class="l">Discovered</div></div>
+    <div class="stat"><div class="n">${scan.markets_screened}</div><div class="l">Screened</div></div>
+    <div class="stat"><div class="n">${scan.symbols_analyzed.length}</div><div class="l">Analyzed</div></div>
+  `;
+}
+
+function renderOpportunities(opportunities) {
+  latestOpportunities = opportunities;
+  const tbody = document.querySelector('#opportunitiesTable tbody');
+  const emptyNote = document.getElementById('opportunitiesEmpty');
+
+  if (!opportunities.length) {
+    tbody.innerHTML = '';
+    emptyNote.style.display = 'block';
+    return;
+  }
+  emptyNote.style.display = 'none';
+
+  tbody.innerHTML = opportunities.map(o => {
+    const change = o.price_change_pct_24h ?? 0;
+    const changeCls = change > 0 ? 'bull' : (change < 0 ? 'bear' : '');
+    const dirCls = o.direction === 'LONG' ? 'bull' : (o.direction === 'SHORT' ? 'bear' : '');
+    const selected = o.symbol === currentSymbol ? 'selected' : '';
+    return `
+      <tr class="${selected}" data-symbol="${o.symbol}">
+        <td>${o.symbol}</td>
+        <td>${o.bias}</td>
+        <td class="${dirCls}">${o.direction}</td>
+        <td>${o.confidence}</td>
+        <td>${o.market_regime}</td>
+        <td>${o.risk_level}</td>
+        <td class="${changeCls}">${change > 0 ? '+' : ''}${change}%</td>
+      </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('tr').forEach(row => {
+    row.addEventListener('click', () => loadSymbolDetail(row.dataset.symbol));
+  });
+}
+
+async function loadHistory(symbol) {
+  const res = await fetch(`${API}/api/history?symbol=${encodeURIComponent(symbol)}&limit=20`);
+  const rows = await res.json();
+  document.querySelector('#historyTable tbody').innerHTML = rows.map(r => {
+    const dirCls = r.direction === 'LONG' ? 'bull' : (r.direction === 'SHORT' ? 'bear' : '');
+    const pnlCls = r.pnl_pct > 0 ? 'pnl-pos' : (r.pnl_pct < 0 ? 'pnl-neg' : '');
+    return `
+    <tr>
+      <td>${new Date(r.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</td>
+      <td>${r.bias}</td>
+      <td class="${dirCls}">${r.direction}</td>
+      <td>${r.confidence}</td>
+      <td><span class="status-pill ${r.status}">${r.status}</span></td>
+      <td class="${pnlCls}">${formatPct(r.pnl_pct)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPositionsTable(open, resolved) {
+  const tbody = document.querySelector('#positionsTable tbody');
+  const emptyNote = document.getElementById('positionsEmpty');
+  const rows = [...open, ...resolved];
+
+  if (!rows.length) {
+    tbody.innerHTML = '';
+    emptyNote.style.display = 'block';
+    return;
+  }
+  emptyNote.style.display = 'none';
+
+  tbody.innerHTML = rows.map(p => {
+    const dirCls = p.direction === 'LONG' ? 'bull' : (p.direction === 'SHORT' ? 'bear' : '');
+    const pnlCls = p.pnl_pct > 0 ? 'pnl-pos' : (p.pnl_pct < 0 ? 'pnl-neg' : '');
+    const nowOrExit = p.status === 'open' ? '…' : formatPrice(p.exit_price);
+    return `
+      <tr>
+        <td>${p.symbol}</td>
+        <td class="${dirCls}">${p.direction}</td>
+        <td><span class="status-pill ${p.status}">${p.status}</span></td>
+        <td>${formatPrice(p.entry_price)}</td>
+        <td>${nowOrExit}</td>
+        <td class="${pnlCls}">${p.status === 'open' ? '—' : formatPct(p.pnl_pct)}</td>
+      </tr>`;
+  }).join('');
+}
+
+async function loadPositions() {
+  const res = await fetch(`${API}/api/positions`);
+  const data = await res.json();
+  renderPositionsTable(data.open, data.recently_resolved);
+}
+
+async function loadCalibration() {
+  const res = await fetch(`${API}/api/calibration`);
+  const cal = await res.json();
+  document.getElementById('calStats').innerHTML = `
+    <div class="stat"><div class="n">${cal.win_rate_pct ?? '—'}${cal.win_rate_pct !== null ? '%' : ''}</div><div class="l">Win rate</div></div>
+    <div class="stat"><div class="n">${cal.total_resolved}</div><div class="l">Resolved</div></div>
+    <div class="stat"><div class="n">${cal.open_positions}</div><div class="l">Open</div></div>
+  `;
+  document.getElementById('calAvgKv').innerHTML = `
+    <div>Avg win</div><div>${cal.avg_win_pct !== null ? formatPct(cal.avg_win_pct) : '—'}</div>
+    <div>Avg loss</div><div>${cal.avg_loss_pct !== null ? formatPct(cal.avg_loss_pct) : '—'}</div>
+  `;
+}
+
+async function loadStatus() {
+  try {
+    const res = await fetch(`${API}/api/status`);
+    const s = await res.json();
+    const badge = document.getElementById('liveBadge');
+    const text = document.getElementById('liveBadgeText');
+
+    if (!s.scanner_running) {
+      badge.className = 'live-badge';
+      text.textContent = 'scanner offline';
+      return;
+    }
+    if (s.is_scanning) {
+      badge.className = 'live-badge scanning';
+      text.textContent = 'scanning now…';
+      return;
+    }
+    badge.className = 'live-badge on';
+    const lastCheck = s.last_position_check_at ? new Date(s.last_position_check_at) : null;
+    const secsAgo = lastCheck ? Math.round((Date.now() - lastCheck.getTime()) / 1000) : null;
+    text.textContent = secsAgo !== null ? `live — positions checked ${secsAgo}s ago` : 'live';
+  } catch {
+    document.getElementById('liveBadge').className = 'live-badge';
+    document.getElementById('liveBadgeText').textContent = 'status unavailable';
+  }
+}
+
+// MANUAL drill-down: re-runs the full pipeline for one specific symbol,
+// whether it's a scan opportunity the person clicked or a free-typed symbol
+// in the "Manual lookup" box. Same endpoint either way.
+async function loadSymbolDetail(symbol) {
+  currentSymbol = symbol;
+  document.querySelectorAll('#opportunitiesTable tbody tr').forEach(row => {
+    row.classList.toggle('selected', row.dataset.symbol === symbol);
+  });
+  document.getElementById('reportPanel').innerHTML = '<div class="loading">Analyzing ' + symbol + '…</div>';
+  try {
+    const res = await fetch(`${API}/api/report/latest?symbol=${encodeURIComponent(symbol)}`);
+    if (!res.ok) throw new Error(await res.text());
+    const report = await res.json();
+    renderReport(report);
+    await loadHistory(symbol);
+  } catch (err) {
+    document.getElementById('reportPanel').innerHTML =
+      `<div class="empty-note">Couldn't analyze "${symbol}" — check the symbol format (e.g. BTC/USDT) and that it's listed on the exchange.</div>`;
+  }
+}
+
+async function loadScan(scanData) {
+  renderScanStats(scanData);
+  renderOpportunities(scanData.opportunities);
+  renderTicker(scanData.opportunities);
+
+  if (scanData.opportunities.length) {
+    await loadSymbolDetail(scanData.opportunities[0].symbol);
+  } else if (scanData.symbols_analyzed.length) {
+    await loadSymbolDetail(scanData.symbols_analyzed[0]);
+  } else {
+    document.getElementById('reportPanel').innerHTML =
+      '<div class="empty-note">No symbols passed the liquidity screen this cycle. Try a manual lookup, or lower SCAN_MIN_QUOTE_VOLUME_24H.</div>';
+  }
+}
+
+async function fetchLatestScan() {
+  const res = await fetch(`${API}/api/scan/latest`);
+  return res.json();
+}
+
+async function fetchNewScan() {
+  const res = await fetch(`${API}/api/scan/run`, { method: 'POST' });
+  return res.json();
+}
+
+async function init() {
+  const scanBtn = document.getElementById('scanBtn');
+  const manualBtn = document.getElementById('manualLookupBtn');
+  const manualInput = document.getElementById('manualSymbol');
+
+  scanBtn.addEventListener('click', async () => {
+    scanBtn.disabled = true;
+    scanBtn.textContent = 'SCANNING…';
+    try {
+      const scanData = await fetchNewScan();
+      await loadScan(scanData);
+      await loadCalibration();
+      await loadPositions();
+    } finally {
+      scanBtn.disabled = false;
+      scanBtn.textContent = 'RUN SCAN';
+    }
+  });
+
+  manualBtn.addEventListener('click', () => {
+    const symbol = manualInput.value.trim();
+    if (symbol) loadSymbolDetail(symbol);
+  });
+  manualInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') manualBtn.click();
+  });
+
+  const scanData = await fetchLatestScan();
+  await loadScan(scanData);
+  await loadCalibration();
+  await loadPositions();
+  await loadStatus();
+
+  // Continuous live feel: the backend keeps scanning and checking open
+  // positions in the background on its own schedule (see app/scheduler.py);
+  // this polling just keeps the dashboard's status badge, live positions,
+  // and win-rate stats in sync with that without the person needing to
+  // click anything or reload the page.
+  setInterval(loadStatus, 10_000);
+  setInterval(loadPositions, 20_000);
+  setInterval(loadCalibration, 20_000);
+}
+
+init();
+</script>
+</body>
+</html>
