@@ -36,7 +36,10 @@ class Hypothesis:
     contradicting: list = field(default_factory=list)
 
 
-def _score_hypotheses(trend: dict, momentum: dict, structure: dict, news: dict) -> list[Hypothesis]:
+def _score_hypotheses(
+    trend: dict, momentum: dict, structure: dict, news: dict,
+    volume_profile: dict | None = None,
+) -> list[Hypothesis]:
     uptrend = Hypothesis("A", "Market is beginning/continuing an uptrend")
     downtrend = Hypothesis("D", "Market is beginning/continuing a downtrend")
     reversal_caution = Hypothesis("B", "Exhaustion / false breakout-or-breakdown — caution")
@@ -121,48 +124,188 @@ def _score_hypotheses(trend: dict, momentum: dict, structure: dict, news: dict) 
         downtrend.supporting.append(f"News/sentiment agent: bearish — {news['headline_summary']}")
         uptrend.contradicting.append("News/sentiment agent flags a bearish catalyst")
 
+    # --- Volume profile evidence (symmetric) ---
+    # Breaking outside the value area (where most volume actually
+    # transacted) is a sharper "the market has repriced" signal than a
+    # swing-point breakout alone — but it's a smaller, corroborating weight,
+    # not a primary driver, since it can lag on fast moves.
+    if volume_profile and volume_profile.get("price_vs_poc") == "above_value_area":
+        uptrend.score += 0.75
+        uptrend.supporting.append(
+            f"Volume profile agent: price {volume_profile['last_close']} trading above the value area "
+            f"high ({volume_profile['value_area_high']}) — outside where most recent volume transacted"
+        )
+    elif volume_profile and volume_profile.get("price_vs_poc") == "below_value_area":
+        downtrend.score += 0.75
+        downtrend.supporting.append(
+            f"Volume profile agent: price {volume_profile['last_close']} trading below the value area "
+            f"low ({volume_profile['value_area_low']}) — outside where most recent volume transacted"
+        )
+
     return [uptrend, downtrend, reversal_caution, range_bound]
 
 
-def _confidence_from_scores(hypotheses: list[Hypothesis]) -> tuple[Hypothesis, int]:
-    winner = max(hypotheses, key=lambda h: h.score)
+def _confidence_from_scores(hypotheses: list[Hypothesis]) -> tuple[Hypothesis, int, bool]:
+    ranked = sorted(hypotheses, key=lambda h: h.score, reverse=True)
+    winner = ranked[0]
+    runner_up = ranked[1]
     total = sum(max(h.score, 0) for h in hypotheses) or 1
     raw_conf = (max(winner.score, 0) / total) * 100
     # Compress toward the middle a bit — never claim near-100% certainty from
     # a handful of technical signals.
     confidence = int(round(35 + raw_conf * 0.55))
-    return winner, max(0, min(confidence, 95))
+    # Conflicted: the top two hypotheses are close enough (runner-up within
+    # 85% of the winner's score, and the winner has some real support) that
+    # picking one and discarding the other throws away real information —
+    # this is exactly the kind of setup likely to whipsaw.
+    conflicted = winner.score > 0 and runner_up.score >= winner.score * 0.85
+    return winner, max(0, min(confidence, 95)), conflicted
 
 
-def build_report(symbol: str, trend: dict, momentum: dict, structure: dict, risk: dict, news: dict) -> dict:
-    hypotheses = _score_hypotheses(trend, momentum, structure, news)
-    winner, confidence = _confidence_from_scores(hypotheses)
+# Reward:risk floor a target is allowed to settle for. The evidence-scaled
+# projection below is designed to always clear this by construction; a
+# structure-level or volume-profile target is only used as a substitute when
+# it also clears it — otherwise a real level sitting close to entry would
+# quietly turn a decent setup into one that risks more than it can gain.
+MIN_ACCEPTABLE_RR = 1.2
+
+# A "next structure level" more than this many multiples of the risk
+# distance away is treated as aspirational rather than a realistic
+# single-cycle target (e.g. the next swing high sitting far outside the
+# recent range) — the evidence-scaled projection is used instead.
+MAX_STRUCTURE_EXTENSION_MULT = 4.0
+
+# The R-multiple fallback target scales with how strong the winning
+# hypothesis's case actually is, instead of applying one flat multiplier to
+# every setup regardless of conviction. A marginal, barely-cleared-the-bar
+# call gets a conservative target near the floor; a high-agreement,
+# multi-signal-confirmed call gets a more ambitious one.
+MIN_EVIDENCE_MULT = 1.3
+MAX_EVIDENCE_MULT = 2.5
+
+
+def _evidence_scaled_multiplier(confidence: int) -> float:
+    """
+    Maps confidence (35-95 after _confidence_from_scores' compression) onto
+    a 1.3x-2.5x reward multiplier for the fallback R-multiple target.
+    """
+    conf_norm = max(0.0, min((confidence - 35) / (95 - 35), 1.0))
+    return MIN_EVIDENCE_MULT + conf_norm * (MAX_EVIDENCE_MULT - MIN_EVIDENCE_MULT)
+
+
+def _select_target(
+    is_long: bool, last_close: float, risk_distance: float,
+    next_level: float | None, vp_level: float | None, evidence_multiplier: float,
+) -> tuple[float, str]:
+    """
+    Picks the target price, preferring (in this order):
+      1. A real further-out structure level (the next swing high/low beyond
+         the immediate resistance/support) — if one exists, sits on the
+         correct side of entry, clears MIN_ACCEPTABLE_RR, and isn't an
+         unrealistic reach (MAX_STRUCTURE_EXTENSION_MULT).
+      2. An evidence-scaled R-multiple projection, when no such level
+         exists or it fails those checks — this always clears the RR floor
+         by construction, since it's derived directly from risk_distance.
+    A volume-profile value-area edge can then pull the chosen target CLOSER
+    to entry (never further out) if a real high-volume zone sits in the
+    way — the market has a genuine reason to pause there — as long as doing
+    so still clears MIN_ACCEPTABLE_RR.
+    """
+    sign = 1 if is_long else -1
+    risk_distance = max(risk_distance, last_close * 1e-6)  # guard against a degenerate zero/negative distance
+
+    target = last_close + sign * risk_distance * evidence_multiplier
+    source = "evidence-scaled projection"
+
+    if next_level is not None:
+        next_reward = sign * (next_level - last_close)
+        next_rr = next_reward / risk_distance
+        on_correct_side = next_reward > 0
+        realistic = next_reward <= risk_distance * MAX_STRUCTURE_EXTENSION_MULT
+        if on_correct_side and next_rr >= MIN_ACCEPTABLE_RR and realistic:
+            target = next_level
+            source = "next structure level"
+
+    if vp_level is not None:
+        vp_reward = sign * (vp_level - last_close)
+        vp_rr = vp_reward / risk_distance
+        on_correct_side = vp_reward > 0
+        nearer_than_current_target = sign * (target - vp_level) > 0
+        if on_correct_side and nearer_than_current_target and vp_rr >= MIN_ACCEPTABLE_RR:
+            target = vp_level
+            source = "volume profile value area"
+
+    return target, source
+
+
+def build_report(
+    symbol: str, trend: dict, momentum: dict, structure: dict, risk: dict, news: dict,
+    correlation: dict | None = None, volume_profile: dict | None = None,
+) -> dict:
+    hypotheses = _score_hypotheses(trend, momentum, structure, news, volume_profile)
+    winner, confidence, conflicted = _confidence_from_scores(hypotheses)
 
     last_close = structure["last_close"]
 
+    # Direction and bias are fixed by the winning hypothesis; confidence
+    # still gets adjusted below (correlation discount, conflict cap) BEFORE
+    # target selection, so a discounted/conflicted setup also gets a more
+    # conservative evidence-scaled target, not just a lower confidence number
+    # sitting next to an unchanged price.
+    if winner.name == "A":
+        bias, direction = ("Bullish" if confidence >= 60 else "Moderately bullish"), "LONG"
+    elif winner.name == "D":
+        bias, direction = ("Bearish" if confidence >= 60 else "Moderately bearish"), "SHORT"
+    elif winner.name == "B":
+        bias, direction = "Cautious / choppy", "WAIT"
+    else:
+        bias, direction = "Neutral / range-bound", "WAIT"
+
+    # Correlation agent: doesn't veto (that's Risk's job), but discounts
+    # confidence when this symbol's technical story is more likely BTC beta
+    # riding a directionless BTC than a real symbol-specific edge.
+    correlation_note = ""
+    if correlation and correlation.get("discount_confidence") and direction != "WAIT":
+        confidence = int(round(confidence * 0.75))
+        correlation_note = (
+            f" (Confidence discounted: {correlation['btc_correlation']*100:.0f}% correlated to BTC, "
+            "which itself is directionless right now.)"
+        )
+
+    # Conflicted read: the runner-up hypothesis was nearly as well supported
+    # as the winner — flag it rather than silently presenting false
+    # certainty, and cap confidence accordingly.
+    if conflicted and direction != "WAIT":
+        confidence = min(confidence, 55)
+        bias += " (conflicted read)"
+
     if winner.name == "A":  # uptrend
-        bias = "Bullish" if confidence >= 60 else "Moderately bullish"
-        direction = "LONG"
         invalidation = structure["support"]
-        target = last_close + (last_close - structure["support"]) * 1.5
-        do_nothing_if = "Price falls back below the invalidation level, or volume collapses on the next bar."
+        risk_distance = last_close - invalidation
+        evidence_multiplier = _evidence_scaled_multiplier(confidence)
+        vp_level = volume_profile.get("value_area_high") if volume_profile else None
+        target, target_source = _select_target(
+            True, last_close, risk_distance, structure.get("next_resistance"), vp_level, evidence_multiplier
+        )
+        do_nothing_if = "Price falls back below the invalidation level, or volume collapses on the next bar." + correlation_note
     elif winner.name == "D":  # downtrend
-        bias = "Bearish" if confidence >= 60 else "Moderately bearish"
-        direction = "SHORT"
         invalidation = structure["resistance"]
-        target = last_close - (structure["resistance"] - last_close) * 1.5
-        do_nothing_if = "Price reclaims back above the invalidation level, or volume collapses on the next bar."
+        risk_distance = invalidation - last_close
+        evidence_multiplier = _evidence_scaled_multiplier(confidence)
+        vp_level = volume_profile.get("value_area_low") if volume_profile else None
+        target, target_source = _select_target(
+            False, last_close, risk_distance, structure.get("next_support"), vp_level, evidence_multiplier
+        )
+        do_nothing_if = "Price reclaims back above the invalidation level, or volume collapses on the next bar." + correlation_note
     elif winner.name == "B":  # reversal caution
-        bias = "Cautious / choppy"
-        direction = "WAIT"
         invalidation = structure["resistance"]
         target = structure["support"]
+        target_source = "mean reversion (no R:RR target — this hypothesis expects a bounce, not a sized trade)"
         do_nothing_if = "No confirmation within the next 1-2 bars — this hypothesis expects mean reversion, not continuation."
     else:  # range bound
-        bias = "Neutral / range-bound"
-        direction = "WAIT"
         invalidation = None
         target = None
+        target_source = None
         do_nothing_if = "Price stays inside the current range with no volume expansion."
 
     # Risk agent has veto power over direction, never over reporting.
@@ -178,10 +321,31 @@ def build_report(symbol: str, trend: dict, momentum: dict, structure: dict, risk
         "C": "Range-bound",
     }[winner.name]
 
+    # Reward:Risk — computed from the FINAL entry/invalidation/target after
+    # every adjustment above (correlation discount and conflict-capping
+    # already shaped the evidence multiplier that set target; the risk veto
+    # zeroes the trade out by forcing WAIT). Only meaningful for an actual
+    # directional call with both levels set — the reversal-caution
+    # hypothesis targets mean reversion, not a sized R:RR trade.
+    risk_reward_ratio = None
+    if direction in ("LONG", "SHORT") and invalidation is not None and target is not None:
+        risk_amount = abs(last_close - invalidation)
+        reward_amount = abs(target - last_close)
+        if risk_amount > 0:
+            risk_reward_ratio = round(reward_amount / risk_amount, 2)
+
     what_changed = winner.supporting[0] if winner.supporting else "No single dominant signal this cycle."
 
     now = datetime.utcnow()
     next_review = now + timedelta(hours=1)
+
+    evidence = winner.supporting + [f"(against) {c}" for c in winner.contradicting]
+    if conflicted:
+        runner_up = sorted(hypotheses, key=lambda h: h.score, reverse=True)[1]
+        evidence.append(
+            f"(conflict) '{runner_up.label}' scored nearly as well ({runner_up.score:.2f} vs "
+            f"{winner.score:.2f}) — treat this call with extra caution"
+        )
 
     return {
         "symbol": symbol,
@@ -189,13 +353,15 @@ def build_report(symbol: str, trend: dict, momentum: dict, structure: dict, risk
         "next_review": next_review.isoformat(),
         "bias": bias,
         "confidence": confidence,
+        "conflicted_signal": conflicted,
         "market_regime": market_regime,
         "what_changed": what_changed,
-        "evidence": winner.supporting + [f"(against) {c}" for c in winner.contradicting],
+        "evidence": evidence,
         "direction": direction,
         "entry_price": round_price(last_close),
         "invalidation_price": round_price(invalidation),
         "target_price": round_price(target),
+        "risk_reward_ratio": risk_reward_ratio,
         "risk_level": risk["risk_level"],
         "do_nothing_if": do_nothing_if,
         "hypotheses_considered": [
@@ -204,6 +370,7 @@ def build_report(symbol: str, trend: dict, momentum: dict, structure: dict, risk
         "agent_outputs": {
             "trend": trend, "momentum": momentum, "structure": structure,
             "risk": risk, "news_sentiment": news,
+            "correlation": correlation, "volume_profile": volume_profile,
         },
     }
 
@@ -225,6 +392,8 @@ def format_report_text(report: dict) -> str:
         lines.append(f"Invalidation: {format_price(report['invalidation_price'])}")
     if report["target_price"] is not None:
         lines.append(f"Target: {format_price(report['entry_price'])} → {format_price(report['target_price'])}")
+    if report["risk_reward_ratio"] is not None:
+        lines.append(f"Risk:Reward: {report['risk_reward_ratio']}:1")
     lines.append(f"Risk: {report['risk_level'].capitalize()}")
     lines.append(f"Do nothing if: {report['do_nothing_if']}")
     lines.append(f"Next review: {datetime.fromisoformat(report['next_review']).strftime('%I:%M %p').lstrip('0')}")

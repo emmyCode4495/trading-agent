@@ -177,13 +177,34 @@
   ul.evidence li.against { color: var(--text-dim); }
   ul.evidence li::before { content: "› "; color: var(--amber-dim); }
 
-  table { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
-  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--panel-border); color: var(--text-mid); }
+  table { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 12px; table-layout: fixed; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--panel-border); color: var(--text-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   th { color: var(--text-dim); font-weight: 500; text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; }
   td.bull { color: var(--bull); }
   td.bear { color: var(--bear); }
   td.pnl-pos { color: var(--bull); font-weight: 600; }
   td.pnl-neg { color: var(--bear); font-weight: 600; }
+  .table-scroll { overflow-x: auto; }
+
+  /* --- Live positions table: fixed 4-column layout designed for a narrow
+     (340px) sidebar panel. Entry/exit prices and status/P&L are each
+     stacked into two lines within one cell instead of spreading across
+     6 flat columns — that's what was overflowing before, since prices for
+     sub-cent tokens run to 8 decimals. --- */
+  #positionsTable { table-layout: fixed; }
+  #positionsTable col.c-sym { width: 24%; }
+  #positionsTable col.c-dir { width: 13%; }
+  #positionsTable col.c-price { width: 35%; }
+  #positionsTable col.c-status { width: 28%; }
+  #positionsTable th, #positionsTable td { padding: 7px 4px; font-size: 11px; vertical-align: middle; }
+  #positionsTable td.sym-cell { font-weight: 500; color: var(--text); }
+  #positionsTable td.dir-cell { font-weight: 600; }
+  #positionsTable td.price-cell, #positionsTable th.price-head { text-align: right; white-space: normal; }
+  #positionsTable td.price-cell .entry { color: var(--text-dim); font-size: 9.5px; line-height: 1.4; }
+  #positionsTable td.price-cell .now { color: var(--text); font-size: 11px; line-height: 1.4; }
+  #positionsTable td.status-cell, #positionsTable th.status-head { text-align: right; white-space: normal; }
+  #positionsTable td.status-cell .pnl-val { display: block; margin-top: 4px; font-size: 12px; }
+  #positionsTable .status-pill { font-size: 9px; padding: 2px 5px; }
 
   .status-pill {
     font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase;
@@ -268,10 +289,15 @@
 
     <div class="panel">
       <p class="eyebrow">Live positions</p>
+      <div class="table-scroll">
       <table id="positionsTable">
-        <thead><tr><th>Symbol</th><th>Dir</th><th>Status</th><th>Entry</th><th>Now / Exit</th><th>P&amp;L</th></tr></thead>
+        <colgroup>
+          <col class="c-sym"><col class="c-dir"><col class="c-price"><col class="c-status">
+        </colgroup>
+        <thead><tr><th>Symbol</th><th>Dir</th><th class="price-head">Entry / Now</th><th class="status-head">Status / P&amp;L</th></tr></thead>
         <tbody></tbody>
       </table>
+      </div>
       <div class="empty-note" id="positionsEmpty" style="display:none;">No open or recently resolved positions yet.</div>
     </div>
   </div>
@@ -279,10 +305,12 @@
   <div>
     <div class="panel">
       <p class="eyebrow">Opportunities — ranked by confidence, WAIT calls excluded</p>
+      <div class="table-scroll">
       <table id="opportunitiesTable">
-        <thead><tr><th>Symbol</th><th>Bias</th><th>Direction</th><th>Conf.</th><th>Regime</th><th>Risk</th><th>24h Δ</th></tr></thead>
+        <thead><tr><th>Symbol</th><th>Bias</th><th>Direction</th><th>Conf.</th><th>Regime</th><th>Risk</th><th>R:RR</th><th>24h Δ</th></tr></thead>
         <tbody></tbody>
       </table>
+      </div>
       <div class="empty-note" id="opportunitiesEmpty" style="display:none;">No actionable opportunities this cycle — every screened symbol came back WAIT. That's a valid outcome, not a bug.</div>
     </div>
 
@@ -292,10 +320,12 @@
 
     <div class="panel">
       <p class="eyebrow">History — <span id="historySymbol">—</span></p>
+      <div class="table-scroll">
       <table id="historyTable">
         <thead><tr><th>Time</th><th>Bias</th><th>Direction</th><th>Conf.</th><th>Status</th><th>P&amp;L</th></tr></thead>
         <tbody></tbody>
       </table>
+      </div>
     </div>
   </div>
 </main>
@@ -328,6 +358,16 @@ function formatPct(pct) {
   return `${sign}${pct.toFixed(2)}%`;
 }
 
+// Color-codes the reward:risk ratio so a weak setup (< 1.2, shouldn't
+// normally happen now that decision.py guards target selection against
+// it — see app/decision.py MIN_ACCEPTABLE_RR) is visually obvious rather
+// than just another number in the grid.
+function formatRR(rr) {
+  if (rr === null || rr === undefined) return '—';
+  const cls = rr >= 1.5 ? 'pnl-pos' : (rr < 1.2 ? 'pnl-neg' : '');
+  return `<span class="${cls}">${rr.toFixed(2)} : 1</span>`;
+}
+
 function setGauge(confidence) {
   const circumference = 267;
   const offset = circumference - (circumference * confidence / 100);
@@ -350,6 +390,7 @@ function renderReport(report) {
     <div>Entry</div><div>${formatPrice(report.entry_price)}</div>
     <div>Invalidation</div><div>${formatPrice(report.invalidation_price)}</div>
     <div>Target</div><div>${formatPrice(report.target_price)}</div>
+    <div>Risk:Reward</div><div>${formatRR(report.risk_reward_ratio)}</div>
   `;
 
   const time = new Date(report.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
@@ -435,6 +476,7 @@ function renderOpportunities(opportunities) {
         <td>${o.confidence}</td>
         <td>${o.market_regime}</td>
         <td>${o.risk_level}</td>
+        <td>${formatRR(o.risk_reward_ratio)}</td>
         <td class="${changeCls}">${change > 0 ? '+' : ''}${change}%</td>
       </tr>`;
   }).join('');
@@ -477,15 +519,20 @@ function renderPositionsTable(open, resolved) {
   tbody.innerHTML = rows.map(p => {
     const dirCls = p.direction === 'LONG' ? 'bull' : (p.direction === 'SHORT' ? 'bear' : '');
     const pnlCls = p.pnl_pct > 0 ? 'pnl-pos' : (p.pnl_pct < 0 ? 'pnl-neg' : '');
-    const nowOrExit = p.status === 'open' ? '…' : formatPrice(p.exit_price);
+    const nowOrExit = p.status === 'open' ? 'now: …' : `exit: ${formatPrice(p.exit_price)}`;
+    const baseAsset = p.symbol.split('/')[0];
     return `
       <tr>
-        <td>${p.symbol}</td>
-        <td class="${dirCls}">${p.direction}</td>
-        <td><span class="status-pill ${p.status}">${p.status}</span></td>
-        <td>${formatPrice(p.entry_price)}</td>
-        <td>${nowOrExit}</td>
-        <td class="${pnlCls}">${p.status === 'open' ? '—' : formatPct(p.pnl_pct)}</td>
+        <td class="sym-cell" title="${p.symbol}">${baseAsset}</td>
+        <td class="dir-cell ${dirCls}">${p.direction}</td>
+        <td class="price-cell">
+          <div class="entry">entry: ${formatPrice(p.entry_price)}</div>
+          <div class="now">${nowOrExit}</div>
+        </td>
+        <td class="status-cell">
+          <span class="status-pill ${p.status}">${p.status}</span>
+          <span class="pnl-val ${pnlCls}">${p.status === 'open' ? '—' : formatPct(p.pnl_pct)}</span>
+        </td>
       </tr>`;
   }).join('');
 }

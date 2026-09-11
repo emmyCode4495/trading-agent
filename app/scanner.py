@@ -142,6 +142,7 @@ def _opportunity_summary(report: dict) -> dict:
         "confidence": report["confidence"],
         "market_regime": report["market_regime"],
         "risk_level": report["risk_level"],
+        "risk_reward_ratio": report.get("risk_reward_ratio"),
         "what_changed": report["what_changed"],
         "quote_volume_24h": report.get("quote_volume_24h"),
         "price_change_pct_24h": report.get("price_change_pct_24h"),

@@ -7,6 +7,7 @@ FastAPI app exposing:
   GET  /api/history?symbol=BTC/USDT&limit=50  -> past recommendations for one symbol
   GET  /api/positions                         -> currently-open + recently-resolved trades, with live P&L%
   GET  /api/calibration                       -> backtest/calibration summary (real-time win rate)
+  GET  /api/calibration/agent-accuracy         -> per-agent accuracy: does each agent's read predict wins?
   GET  /api/status                            -> is the background scanner running, last/next scan time
   GET  /api/symbols                           -> the manual watchlist (optional, secondary to the scanner)
   GET  /                                       -> the dashboard UI
@@ -29,7 +30,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import scan_state
-from app.backtest import calibration_report, evaluate_open_positions, open_positions_summary, recent_resolved_summary
+from app.backtest import (agent_accuracy_report, calibration_report, evaluate_open_positions,
+                           open_positions_summary, recent_resolved_summary)
 from app.config import settings
 from app.data import get_adapter
 from app.models import Recommendation, ScanRun, get_session, init_db
@@ -215,6 +217,12 @@ def positions():
 def calibration():
     evaluate_open_positions()
     return calibration_report()
+
+
+@app.get("/api/calibration/agent-accuracy")
+def agent_accuracy():
+    """Per-agent accuracy: does each agent's own directional read, when it agrees with the trade taken, actually predict wins?"""
+    return agent_accuracy_report()
 
 
 @app.get("/api/symbols")

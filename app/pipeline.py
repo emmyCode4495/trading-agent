@@ -12,7 +12,7 @@ the manual-watchlist fallback used by `scripts/run_once.py`.
 """
 import json
 
-from app.agents import momentum, news_sentiment, risk, structure, trend
+from app.agents import correlation, momentum, news_sentiment, risk, structure, trend, volume_profile
 from app.config import settings
 from app.data import get_adapter
 from app.decision import build_report, format_report_text
@@ -27,8 +27,13 @@ def run_cycle(symbol: str) -> dict:
     structure_out = structure.run(adapter, symbol)
     risk_out = risk.run(adapter, symbol, max_volatility_pct=settings.max_volatility_pct)
     news_out = news_sentiment.run(symbol)
+    correlation_out = correlation.run(adapter, symbol)
+    volume_profile_out = volume_profile.run(adapter, symbol)
 
-    report = build_report(symbol, trend_out, momentum_out, structure_out, risk_out, news_out)
+    report = build_report(
+        symbol, trend_out, momentum_out, structure_out, risk_out, news_out,
+        correlation=correlation_out, volume_profile=volume_profile_out,
+    )
     report["text"] = format_report_text(report)
 
     _persist(report)

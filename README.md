@@ -118,11 +118,13 @@ lookup" box, GET /api/report/latest?symbol=...).
 | Trend agent | `app/agents/trend.py` | EMA slope + multi-timeframe (15m/1h/4h/1d) agreement. Pure pandas, no LLM. |
 | Momentum agent | `app/agents/momentum.py` | RSI, MACD histogram, volume-vs-average. Pure pandas, no LLM. |
 | Structure agent | `app/agents/structure.py` | Swing-point support/resistance, breakout/breakdown detection. Pure pandas, no LLM. |
-| Risk agent | `app/agents/risk.py` | Volatility check with **veto power** — the decision engine cannot override it. |
+| Risk agent | `app/agents/risk.py` | Volatility check with **veto power** — the decision engine cannot override it. Regime-adaptive: thresholds are computed per-symbol from that symbol's own recent volatility distribution (90-bar p90), not one flat global number. |
 | News/Sentiment agent | `app/agents/news_sentiment.py` | The one agent that legitimately needs an LLM (it interprets language, not numbers). Off by default (`ENABLE_LLM_AGENTS=false`); uses the Anthropic API + web search when enabled. |
-| Decision engine | `app/decision.py` | Scores 3 competing hypotheses (uptrend / false breakout / range-bound) against the evidence, picks the best-supported one, formats the final report. |
-| Pipeline | `app/pipeline.py` | `run_cycle(symbol)` runs one full cycle for a single symbol and persists it — called once per shortlisted symbol by the scanner, and directly by the manual watchlist path. Symbol-agnostic; doesn't know or care whether the scanner or a person chose the symbol. |
-| Backtest/calibration | `app/backtest.py` | Re-checks past recommendations at +1h/+6h/+24h; aggregates win rate, calibration by confidence bucket, performance by regime. **This is the layer that tells you whether the system is actually any good — trust it over the confidence score itself.** |
+| Correlation agent | `app/agents/correlation.py` | Measures the symbol's return correlation to BTC/USDT and BTC's own trend. Doesn't veto — discounts confidence when a symbol is highly BTC-correlated *and* BTC itself is directionless, since that combination means the symbol's own technical story is more likely BTC beta than a real edge. |
+| Volume profile agent | `app/agents/volume_profile.py` | Builds a volume-at-price histogram from recent bars and derives the Point of Control and a 70% value area — sharper, volume-backed levels than swing-point S/R alone. Feeds both hypothesis scoring and target-price selection. |
+| Decision engine | `app/decision.py` | Scores 4 competing hypotheses (uptrend / downtrend / reversal caution / range-bound) against the evidence, picks the best-supported one, formats the final report. Flags a `conflicted_signal` when the runner-up hypothesis scored nearly as well as the winner, and caps confidence accordingly rather than presenting false certainty. |
+| Pipeline | `app/pipeline.py` | `run_cycle(symbol)` runs one full cycle for a single symbol (all 7 agents → decision engine) and persists it — called once per shortlisted symbol by the scanner, and directly by the manual watchlist path. Symbol-agnostic; doesn't know or care whether the scanner or a person chose the symbol. |
+| Backtest/calibration | `app/backtest.py` | Re-checks past recommendations continuously against real price; aggregates win rate, calibration by confidence bucket, performance by regime. **This is the layer that tells you whether the system is actually any good — trust it over the confidence score itself.** `agent_accuracy_report()` breaks this down further: of the trades where a given agent's own directional read agreed with the direction taken, what fraction won — the real feedback loop for eventually tuning `_score_hypotheses`' hand-picked weights. |
 | Scheduler | `app/scheduler.py` | Hourly automation via APScheduler — runs a full scan, not a fixed watchlist. |
 | API + Dashboard | `app/api.py`, `app/static/dashboard.html` | FastAPI serving JSON + a terminal-style dashboard (vanilla HTML/JS, no build step). `/api/scan/*` and `/api/markets` are the scanner surface; `/api/report/latest` is the manual drill-down. |
 
@@ -237,12 +239,18 @@ Notes on the implementation:
 
 ## Roadmap ideas
 
-- Per-agent accuracy tracking in the backtest report (which agent's signal
-  actually correlates with wins, not just the final blended call)
+- ~~Per-agent accuracy tracking in the backtest report~~ — done, see
+  `backtest.agent_accuracy_report()` / `GET /api/calibration/agent-accuracy`.
+  Still to do: actually feed this back into `_score_hypotheses`' weights
+  (currently hand-picked constants) once there's enough resolved-trade volume.
+- ~~Multi-asset correlation agent~~ — done, see `app/agents/correlation.py`.
+  Currently only checks correlation to BTC/USDT; extending to an ETH/BTC
+  ratio or a broader dominance index is a natural next step.
+- Walk-forward validation for `backtest.py` (train/tune on one window, test
+  on the next, roll forward) rather than one static historical check, so
+  weight/threshold tuning doesn't overfit to whichever period it was tuned on
 - Position sizing suggestions in the risk agent (e.g. Kelly-fraction-style,
   capped)
-- Multi-asset correlation agent (e.g. does BTC dominance/ETH/BTC ratio
-  change the read)
 - Swap the vanilla dashboard JS for a small React app if you want richer
   interactivity (charts, filters) — the API is already decoupled from the
   frontend so this is a drop-in replacement.
