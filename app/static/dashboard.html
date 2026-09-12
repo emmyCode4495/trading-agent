@@ -227,6 +227,7 @@
 
   .loading { color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 40px 0; text-align: center; }
   .empty-note { color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 12px 0; }
+  .empty-note.error { color: var(--bear); word-break: break-word; }
 </style>
 </head>
 <body>
@@ -444,8 +445,14 @@ function renderTicker(opportunities) {
 function renderScanStats(scan) {
   document.getElementById('scanTimestamp').textContent =
     scan.finished_at ? new Date(scan.finished_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '—';
+  // markets_discovered is 0 only when discovery itself failed (see
+  // scan.error) - a normal "nothing liquid enough" cycle still has a
+  // nonzero Discovered count with Screened/Analyzed at 0. Flagging
+  // Discovered in red for that case makes the two situations visually
+  // distinct at a glance instead of both just showing rows of zeros.
+  const discoveredCls = scan.error && scan.markets_discovered === 0 ? 'bear' : '';
   document.getElementById('scanStats').innerHTML = `
-    <div class="stat"><div class="n">${scan.markets_discovered}</div><div class="l">Discovered</div></div>
+    <div class="stat"><div class="n ${discoveredCls}">${scan.markets_discovered}</div><div class="l">Discovered</div></div>
     <div class="stat"><div class="n">${scan.markets_screened}</div><div class="l">Screened</div></div>
     <div class="stat"><div class="n">${scan.symbols_analyzed.length}</div><div class="l">Analyzed</div></div>
   `;
@@ -614,10 +621,26 @@ async function loadScan(scanData) {
     await loadSymbolDetail(scanData.opportunities[0].symbol);
   } else if (scanData.symbols_analyzed.length) {
     await loadSymbolDetail(scanData.symbols_analyzed[0]);
+  } else if (scanData.error) {
+    // Discovery/screening itself failed this cycle (e.g. every configured
+    // exchange was unreachable) - a fundamentally different situation from
+    // "ran fine, nothing was liquid enough", and lowering
+    // SCAN_MIN_QUOTE_VOLUME_24H does nothing to fix it. markets_discovered
+    // will read 0 in this case too (see renderScanStats) - show the actual
+    // reason instead of the generic liquidity-screen copy so it isn't
+    // mistaken for a config/threshold problem.
+    document.getElementById('reportPanel').innerHTML =
+      `<div class="empty-note error">Scan failed before analysis could run: ${escapeHtml(scanData.error)}</div>`;
   } else {
     document.getElementById('reportPanel').innerHTML =
       '<div class="empty-note">No symbols passed the liquidity screen this cycle. Try a manual lookup, or lower SCAN_MIN_QUOTE_VOLUME_24H.</div>';
   }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str == null ? '' : String(str);
+  return div.innerHTML;
 }
 
 async function fetchLatestScan() {
