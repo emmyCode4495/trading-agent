@@ -24,7 +24,7 @@ on-demand scans triggered by the RUN SCAN button).
 import json
 import os
 
-from fastapi import FastAPI, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,7 +34,8 @@ from app.backtest import (agent_accuracy_report, calibration_report, evaluate_op
                            open_positions_summary, recent_resolved_summary)
 from app.config import settings
 from app.data import get_adapter
-from app.models import Recommendation, ScanRun, get_session, init_db
+from app.models import Execution, Recommendation, ScanRun, get_session, init_db
+from app.payments.subscriptions import SubscriptionError, activate_subscription, is_active
 from app.pipeline import run_cycle
 from app.scanner import discover_markets, run_scan, screen_by_liquidity
 
@@ -228,6 +229,58 @@ def agent_accuracy():
 @app.get("/api/symbols")
 def symbols():
     return settings.symbols
+
+
+@app.get("/api/executions")
+def executions(limit: int = 50):
+    """
+    Full audit trail of what the executor did with each recommendation —
+    including skipped ones, so it's clear whether nothing happened because
+    of low confidence, an existing position, or an actual Hyperliquid error.
+    """
+    session = get_session()
+    try:
+        rows = session.query(Execution).order_by(Execution.created_at.desc()).limit(limit).all()
+        return [
+            {
+                "id": r.id,
+                "created_at": r.created_at.isoformat(),
+                "recommendation_id": r.recommendation_id,
+                "symbol": r.symbol,
+                "hl_symbol": r.hl_symbol,
+                "direction": r.direction,
+                "requested_size": r.requested_size,
+                "status": r.status,
+                "skip_reason": r.skip_reason,
+                "builder_fee_tenths_bps": r.builder_fee_tenths_bps,
+            }
+            for r in rows
+        ]
+    finally:
+        session.close()
+
+
+@app.post("/api/subscribe")
+def subscribe(payload: dict = Body(...)):
+    """
+    body: {"wallet_address": "0x...", "tx_hash": "0x..."}
+    Verifies the payment on Tempo before activating — never trusts the claim
+    alone. See app/payments/subscriptions.py for the full flow and the
+    Tempo Zones upgrade path noted there.
+    """
+    wallet_address = payload.get("wallet_address")
+    tx_hash = payload.get("tx_hash")
+    if not wallet_address or not tx_hash:
+        raise HTTPException(status_code=400, detail="wallet_address and tx_hash are both required")
+    try:
+        return activate_subscription(wallet_address, tx_hash)
+    except SubscriptionError as exc:
+        raise HTTPException(status_code=402, detail=str(exc))
+
+
+@app.get("/api/subscribers/{wallet_address}/status")
+def subscriber_status(wallet_address: str):
+    return {"wallet_address": wallet_address, "active": is_active(wallet_address)}
 
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

@@ -14,10 +14,13 @@ def _load_registry():
     from app.data.binance_adapter import BinanceAdapter
     from app.data.bybit_adapter import BybitAdapter
     from app.data.mexc_adapter import MexcAdapter
+    from app.data.hyperliquid_adapter import HyperliquidAdapter
     _REAL_ADAPTER_REGISTRY.update({
         "binance": BinanceAdapter,
         "bybit": BybitAdapter,
         "mexc": MexcAdapter,
+        "hyperliquid": HyperliquidAdapter,
+        "hl": HyperliquidAdapter,
     })
     return _REAL_ADAPTER_REGISTRY
 
@@ -27,6 +30,13 @@ def get_adapter():
 
     if source == "mock":
         return MockAdapter()
+
+    # Combined mode: CEX failover + Hyperliquid markets merged.
+    # Scanner sees both universes; execution still only happens for
+    # symbols that exist as Hyperliquid perps.
+    if source in ("combined", "cex+hl", "all"):
+        from app.data.combined_adapter import CombinedAdapter
+        return CombinedAdapter()
 
     if source in ("auto", "multi", "failover"):
         from app.data.failover_adapter import FailoverAdapter
@@ -46,5 +56,5 @@ def get_adapter():
 
     raise ValueError(
         f"Unknown DATA_SOURCE: '{settings.data_source}'. "
-        f"Use 'mock', 'auto', or one of: {list(registry)}"
+        f"Use 'mock', 'auto', 'combined', or one of: {list(registry)}"
     )

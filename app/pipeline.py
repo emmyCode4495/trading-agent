@@ -37,6 +37,13 @@ def run_cycle(symbol: str) -> dict:
     report["text"] = format_report_text(report)
 
     _persist(report)
+
+    # Execution is fully additive and off by default (EXECUTION_ENABLED=false).
+    # Import here, not at module top, so this file has zero hard dependency
+    # on hyperliquid-python-sdk being installed when execution isn't in use.
+    from app.execution.executor import maybe_execute
+    report["execution"] = maybe_execute(report)
+
     return report
 
 

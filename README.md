@@ -221,6 +221,40 @@ Notes on the implementation:
   same drop-in pattern, and it becomes available for `DATA_SOURCE_PRIORITY`
   automatically.
 
+## Execution & payments (Hyperliquid + Tempo) — OFF by default
+
+Two additive layers sit on top of the pipeline above without changing any
+agent, the decision engine, or the scanner. Both are disabled by default
+(`EXECUTION_ENABLED=false`, `PAYMENTS_ENABLED=false`) — the system behaves
+exactly as described above until you opt in.
+
+| Piece | File(s) | Notes |
+|---|---|---|
+| Position sizing | `app/execution/sizing.py` | Fixed-fractional risk sizing (risk a fixed % of equity on the distance to invalidation), not Kelly — see the module docstring for why. Capped by `MAX_POSITION_PCT_OF_EQUITY` so a tight stop can't produce an oversized position. |
+| Hyperliquid adapter | `app/execution/hyperliquid_adapter.py` | Thin wrapper around `hyperliquid-python-sdk`. Every order carries `HYPERLIQUID_BUILDER_ADDRESS` as a builder code, so fills route back a fee share automatically — no token stake required. |
+| Executor | `app/execution/executor.py` | The seam: consumes the same report dict `pipeline.run_cycle()` already produces. Gates on `direction != WAIT`, `confidence >= MIN_CONFIDENCE_TO_ACT`, and no same-direction position already open (flips opposite positions, skips pyramiding). Every attempt — including skips — is persisted to the `executions` table (`GET /api/executions`) for a full audit trail. |
+| Tempo adapter | `app/payments/tempo_adapter.py` | Standard web3.py against Tempo's EVM RPC. TIP-20 (Tempo's stablecoin standard) exposes an ERC-20-compatible interface, so no special SDK is needed for transfers/balances. |
+| Subscriptions | `app/payments/subscriptions.py` | `POST /api/subscribe` verifies a claimed payment on-chain (via `tempo_adapter.verify_incoming_payment`) before activating — never trusts the claim alone. |
+
+**Setup, testnet-first:**
+1. Hyperliquid: generate an API wallet at https://app.hyperliquid-testnet.xyz/API, set `HYPERLIQUID_PRIVATE_KEY`/`HYPERLIQUID_ACCOUNT_ADDRESS`/`HYPERLIQUID_BUILDER_ADDRESS` in `.env`, then call `hyperliquid_adapter.ensure_builder_fee_approved()` once.
+2. Tempo: get a wallet + free testnet pathUSD from the faucet at https://tempo.xyz/developers/docs/quickstart/faucet, set `TEMPO_OPERATOR_PRIVATE_KEY`/`TEMPO_OPERATOR_ADDRESS`.
+3. Set `EXECUTION_ENABLED=true` / `PAYMENTS_ENABLED=true` only once both are funded on testnet.
+
+**Known gap, real-money blocker:** order sizes aren't yet rounded to each
+asset's `szDecimals` (Hyperliquid rejects orders with too much size
+precision) — this needs a real testnet call to `Info.meta()` to fetch per-
+asset precision, which this sandbox's network couldn't reach while building
+this (see the "Testing" note above — same restriction applies here). Confirm
+this against a real testnet order before going further.
+
+**Privacy upgrade path (not built yet):** Tempo's [Zones](https://tempo.xyz/blog/introducing-tempo-zones/)
+feature — private, permissioned parallel chains with selective disclosure —
+is the natural next step for the subscription flow, so a subscriber's
+payment amount/identity isn't publicly visible, only to the operator and any
+auditor holding a viewing key. Slots into `subscriptions.py` without
+changing its interface.
+
 ## Before you trust this with real money
 
 - **Let the backtest layer run for a while first.** Hundreds of logged

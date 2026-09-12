@@ -11,4 +11,15 @@ python-dotenv==1.0.1
 anthropic==0.34.2
 
 # Optional — only needed once you swap DATABASE_URL to Postgres/Timescale
-psycopg2-binary==2.9.9
+# psycopg2-binary==2.9.9
+
+# Optional — only needed if EXECUTION_ENABLED=true (Hyperliquid)
+hyperliquid-python-sdk==0.24.0
+
+# Optional — only needed if PAYMENTS_ENABLED=true (Tempo)
+# Pinned to 6.20.3, NOT the latest 8.x: web3>=7 requires eth-account>=0.14,
+# which conflicts with hyperliquid-python-sdk's eth-account<0.14 ceiling.
+# Verified this pin combination installs cleanly (pip check) alongside the
+# SDK above — don't bump web3 without re-checking that.
+web3==6.20.3
+eth-account>=0.10.0,<0.14.0

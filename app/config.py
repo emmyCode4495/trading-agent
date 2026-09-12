@@ -95,5 +95,53 @@ class Settings:
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
 
+    # --- Execution (Hyperliquid): OFF by default. The scanner/agents/
+    # decision engine above are unaffected either way — this only controls
+    # whether a qualifying report also gets sent to Hyperliquid as an order.
+    execution_enabled: bool = os.getenv("EXECUTION_ENABLED", "false").lower() == "true"
+    hyperliquid_env: str = os.getenv("HYPERLIQUID_ENV", "testnet")  # "testnet" or "mainnet" — start on testnet
+    # Private key of the API wallet (NOT your main wallet) generated at
+    # https://app.hyperliquid.xyz/API (or the testnet equivalent). This wallet
+    # can only trade on your behalf, never withdraw.
+    hyperliquid_private_key: str = os.getenv("HYPERLIQUID_PRIVATE_KEY", "")
+    # Main wallet address the API wallet trades on behalf of. Required
+    # whenever the API wallet differs from the main account (the normal case).
+    hyperliquid_account_address: str = os.getenv("HYPERLIQUID_ACCOUNT_ADDRESS", "")
+    # Your builder address — every order this system places attributes its
+    # fee share here. Same address as hyperliquid_account_address is fine to
+    # start; a dedicated builder wallet is cleaner once this is a real product.
+    hyperliquid_builder_address: str = os.getenv("HYPERLIQUID_BUILDER_ADDRESS", "")
+    # Fee rate as a string percentage, e.g. "0.01%" — passed to
+    # approve_builder_fee once. Must be a ceiling the user approves; you can
+    # charge up to this, not more.
+    hyperliquid_builder_max_fee_rate: str = os.getenv("HYPERLIQUID_BUILDER_MAX_FEE_RATE", "0.05%")
+    # Actual per-order fee in tenths of a basis point (Hyperliquid's native
+    # unit for the `f` field) — 10 = 1bp = 0.01%. Must be <= the approved max.
+    hyperliquid_builder_fee_tenths_bps: int = int(os.getenv("HYPERLIQUID_BUILDER_FEE_TENTHS_BPS", "5"))
+    hyperliquid_max_slippage_pct: float = float(os.getenv("HYPERLIQUID_MAX_SLIPPAGE_PCT", "0.02"))  # 2%
+
+    # --- Position sizing (fixed-fractional risk sizing, not Kelly — see
+    # app/execution/sizing.py for why). Applied only when execution_enabled. ---
+    risk_per_trade_pct: float = float(os.getenv("RISK_PER_TRADE_PCT", "1.0"))       # % of equity risked per trade
+    max_position_pct_of_equity: float = float(os.getenv("MAX_POSITION_PCT_OF_EQUITY", "20.0"))
+
+    # --- Payments (Tempo): OFF by default, independent of execution. ---
+    payments_enabled: bool = os.getenv("PAYMENTS_ENABLED", "false").lower() == "true"
+    tempo_env: str = os.getenv("TEMPO_ENV", "testnet")  # "testnet" (Moderato) or "mainnet"
+    tempo_rpc_url_testnet: str = os.getenv("TEMPO_RPC_URL_TESTNET", "https://rpc.moderato.tempo.xyz")
+    tempo_rpc_url_mainnet: str = os.getenv("TEMPO_RPC_URL_MAINNET", "https://rpc.tempo.xyz")
+    # Wallet that receives subscription payments / sends payouts. Private key
+    # only needed for the payout side (sending); receiving needs just the address.
+    tempo_operator_private_key: str = os.getenv("TEMPO_OPERATOR_PRIVATE_KEY", "")
+    tempo_operator_address: str = os.getenv("TEMPO_OPERATOR_ADDRESS", "")
+    # pathUSD is Tempo's first predeployed stablecoin — same address on
+    # mainnet and testnet (Tempo's predeployed contracts use deterministic
+    # addresses). Verify on https://explore.testnet.tempo.xyz before relying
+    # on this for real funds.
+    tempo_stablecoin_address: str = os.getenv("TEMPO_STABLECOIN_ADDRESS", "0x20c0000000000000000000000000000000000000")
+    tempo_stablecoin_decimals: int = int(os.getenv("TEMPO_STABLECOIN_DECIMALS", "6"))
+    subscription_price_usd: float = float(os.getenv("SUBSCRIPTION_PRICE_USD", "20.0"))
+    subscription_period_days: int = int(os.getenv("SUBSCRIPTION_PERIOD_DAYS", "30"))
+
 
 settings = Settings()

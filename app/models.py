@@ -115,6 +115,72 @@ class RecommendationOutcome(Base):
     recommendation = relationship("Recommendation", back_populates="outcomes")
 
 
+class Execution(Base):
+    """
+    One attempt to act on a Recommendation by placing a real (or testnet)
+    Hyperliquid order. Separate from Recommendation itself so the decision-
+    support pipeline stays untouched — this table only exists when
+    EXECUTION_ENABLED=true actually sends something.
+
+    `status` distinguishes *why* nothing was sent (skipped) from an attempt
+    that failed (error) from one that succeeded (submitted/filled/closed) —
+    the dashboard needs to tell "confidence too low" apart from "Hyperliquid
+    rejected the order".
+    """
+    __tablename__ = "executions"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    recommendation_id = Column(Integer, ForeignKey("recommendations.id"), nullable=False)
+    symbol = Column(String, index=True, nullable=False)          # original format, e.g. BTC/USDT
+    hl_symbol = Column(String, nullable=False)                    # Hyperliquid format, e.g. BTC
+    direction = Column(String, nullable=False)                    # LONG / SHORT
+    requested_size = Column(Float)                                 # units of the underlying asset
+    equity_at_sizing = Column(Float)                                # account equity used for the sizing calc
+    status = Column(String, default="skipped", index=True)        # skipped / submitted / filled / rejected / error / closed
+    skip_reason = Column(Text, nullable=True)                      # populated when status == "skipped"
+    hyperliquid_response_json = Column(Text, nullable=True)        # raw SDK response, for debugging
+    builder_fee_tenths_bps = Column(Integer, nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    close_response_json = Column(Text, nullable=True)
+
+
+class Subscriber(Base):
+    """
+    Someone who has paid (in TIP-20 stablecoin, via Tempo) for premium signal
+    access. `status` gates access in the API layer; `next_payment_due` is
+    what a renewal reminder / auto-charge job would check.
+    """
+    __tablename__ = "subscribers"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    wallet_address = Column(String, index=True, unique=True, nullable=False)  # Tempo (EVM) address
+    tier = Column(String, default="premium")
+    status = Column(String, default="active", index=True)   # active / past_due / canceled
+    last_payment_at = Column(DateTime, nullable=True)
+    last_payment_tx_hash = Column(String, nullable=True)
+    next_payment_due = Column(DateTime, nullable=True)
+    total_paid_usd = Column(Float, default=0.0)
+
+
+class Payout(Base):
+    """
+    A payment this system *sent* out over Tempo — e.g. a referral/profit-
+    share distribution funded by Hyperliquid builder-fee revenue. Kept
+    separate from Subscriber (money in) for a clean audit trail of money out.
+    """
+    __tablename__ = "payouts"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    recipient_address = Column(String, index=True, nullable=False)
+    amount_usd = Column(Float, nullable=False)
+    reason = Column(String)              # e.g. "builder_fee_share", "referral"
+    tx_hash = Column(String, nullable=True)
+    status = Column(String, default="pending")  # pending / sent / failed
+
+
 engine = create_engine(settings.database_url, connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
