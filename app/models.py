@@ -181,6 +181,18 @@ class Payout(Base):
     status = Column(String, default="pending")  # pending / sent / failed
 
 
+class AppSetting(Base):
+    """
+    Simple key/value store for runtime toggles that should survive restarts
+    without editing .env — e.g. user-facing execution opt-in from Telegram.
+    """
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 engine = create_engine(settings.database_url, connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 

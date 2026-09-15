@@ -39,10 +39,24 @@ def run_cycle(symbol: str) -> dict:
     _persist(report)
 
     # Execution is fully additive and off by default (EXECUTION_ENABLED=false).
-    # Import here, not at module top, so this file has zero hard dependency
-    # on hyperliquid-python-sdk being installed when execution isn't in use.
-    from app.execution.executor import maybe_execute
-    report["execution"] = maybe_execute(report)
+    # Import is guarded so missing hyperliquid/eth_account packages never crash
+    # the scanner when execution is disabled.
+    if settings.execution_enabled:
+        try:
+            from app.execution.executor import maybe_execute
+            report["execution"] = maybe_execute(report)
+        except ImportError as exc:
+            report["execution"] = {
+                "executed": False,
+                "status": "error",
+                "reason": f"Execution dependencies missing: {exc}",
+            }
+    else:
+        report["execution"] = {
+            "executed": False,
+            "status": "skipped",
+            "reason": "EXECUTION_ENABLED=false",
+        }
 
     return report
 

@@ -35,9 +35,23 @@ from app.backtest import (agent_accuracy_report, calibration_report, evaluate_op
 from app.config import settings
 from app.data import get_adapter
 from app.models import Execution, Recommendation, ScanRun, get_session, init_db
-from app.payments.subscriptions import SubscriptionError, activate_subscription, is_active
 from app.pipeline import run_cycle
 from app.scanner import discover_markets, run_scan, screen_by_liquidity
+
+# Payments imports are optional — the app must start even when web3/eth_account
+# are not installed (common when EXECUTION/PAYMENTS are disabled).
+try:
+    from app.payments.subscriptions import SubscriptionError, activate_subscription, is_active
+    _PAYMENTS_AVAILABLE = True
+except ImportError:
+    _PAYMENTS_AVAILABLE = False
+    SubscriptionError = Exception  # type: ignore
+
+    def activate_subscription(*args, **kwargs):  # type: ignore
+        raise HTTPException(status_code=503, detail="Payments dependencies not installed (web3/eth_account).")
+
+    def is_active(*args, **kwargs):  # type: ignore
+        return False
 
 app = FastAPI(title="Market Intelligence Agent")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -45,19 +59,24 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 init_db()
 
 _background_scheduler = None
+_telegram_bot_thread = None
 
 
 @app.on_event("startup")
-def _launch_background_scanner():
-    global _background_scheduler
-    if os.getenv("ENABLE_BACKGROUND_SCANNER", "true").lower() != "true":
-        return
-    from app.scheduler import start_background
-    _background_scheduler = start_background()
+def _launch_background_services():
+    global _background_scheduler, _telegram_bot_thread
+    if os.getenv("ENABLE_BACKGROUND_SCANNER", "true").lower() == "true":
+        from app.scheduler import start_background
+        _background_scheduler = start_background()
+
+    # Interactive Telegram bot (optional)
+    if settings.enable_telegram_bot and settings.telegram_bot_token:
+        from app.notifiers.telegram_bot import start_bot_background
+        _telegram_bot_thread = start_bot_background()
 
 
 @app.on_event("shutdown")
-def _stop_background_scanner():
+def _stop_background_services():
     if _background_scheduler is not None:
         _background_scheduler.shutdown(wait=False)
 

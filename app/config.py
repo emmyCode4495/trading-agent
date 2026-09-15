@@ -70,9 +70,13 @@ class Settings:
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     enable_llm_agents: bool = os.getenv("ENABLE_LLM_AGENTS", "false").lower() == "true"
 
-    # --- Notifications ---
+    # --- Notifications / interactive bot ---
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    # Comma-separated chat IDs allowed to use the interactive bot.
+    # Empty = allow anyone who messages the bot (fine for personal use).
+    telegram_allowed_chat_ids: str = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "")
+    enable_telegram_bot: bool = os.getenv("ENABLE_TELEGRAM_BOT", "true").lower() == "true"
 
     # --- Scheduling ---
     # Full market scan (discover -> screen -> analyze -> rank): the expensive

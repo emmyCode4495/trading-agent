@@ -279,27 +279,62 @@ def build_report(
         confidence = min(confidence, 55)
         bias += " (conflicted read)"
 
-    if winner.name == "A":  # uptrend
-        invalidation = structure["support"]
-        risk_distance = last_close - invalidation
-        evidence_multiplier = _evidence_scaled_multiplier(confidence)
-        vp_level = volume_profile.get("value_area_high") if volume_profile else None
-        target, target_source = _select_target(
-            True, last_close, risk_distance, structure.get("next_resistance"), vp_level, evidence_multiplier
-        )
-        do_nothing_if = "Price falls back below the invalidation level, or volume collapses on the next bar." + correlation_note
-    elif winner.name == "D":  # downtrend
-        invalidation = structure["resistance"]
-        risk_distance = invalidation - last_close
-        evidence_multiplier = _evidence_scaled_multiplier(confidence)
-        vp_level = volume_profile.get("value_area_low") if volume_profile else None
-        target, target_source = _select_target(
-            False, last_close, risk_distance, structure.get("next_support"), vp_level, evidence_multiplier
-        )
-        do_nothing_if = "Price reclaims back above the invalidation level, or volume collapses on the next bar." + correlation_note
+    # Minimum risk distance: at least 0.15% of price so we never size off
+    # a zero/inverted stop that collapses R:R to nonsense.
+    min_risk = max(last_close * 0.0015, 1e-8)
+
+    if winner.name == "A":  # uptrend → LONG only if support is actually below price
+        support = structure.get("support")
+        if support is None or support >= last_close:
+            # Structure doesn't support a valid long stop → do not emit LONG
+            direction = "WAIT"
+            bias = "Cautious (no valid long structure)"
+            invalidation = support
+            target = None
+            target_source = None
+            do_nothing_if = (
+                "Support is missing or sits at/above price — cannot define a valid "
+                "long invalidation below entry." + correlation_note
+            )
+        else:
+            invalidation = support
+            risk_distance = max(last_close - invalidation, min_risk)
+            evidence_multiplier = _evidence_scaled_multiplier(confidence)
+            vp_level = volume_profile.get("value_area_high") if volume_profile else None
+            target, target_source = _select_target(
+                True, last_close, risk_distance, structure.get("next_resistance"), vp_level, evidence_multiplier
+            )
+            do_nothing_if = (
+                "Price falls back below the invalidation level, or volume collapses on the next bar."
+                + correlation_note
+            )
+    elif winner.name == "D":  # downtrend → SHORT only if resistance is actually above price
+        resistance = structure.get("resistance")
+        if resistance is None or resistance <= last_close:
+            direction = "WAIT"
+            bias = "Cautious (no valid short structure)"
+            invalidation = resistance
+            target = None
+            target_source = None
+            do_nothing_if = (
+                "Resistance is missing or sits at/below price — cannot define a valid "
+                "short invalidation above entry." + correlation_note
+            )
+        else:
+            invalidation = resistance
+            risk_distance = max(invalidation - last_close, min_risk)
+            evidence_multiplier = _evidence_scaled_multiplier(confidence)
+            vp_level = volume_profile.get("value_area_low") if volume_profile else None
+            target, target_source = _select_target(
+                False, last_close, risk_distance, structure.get("next_support"), vp_level, evidence_multiplier
+            )
+            do_nothing_if = (
+                "Price reclaims back above the invalidation level, or volume collapses on the next bar."
+                + correlation_note
+            )
     elif winner.name == "B":  # reversal caution
-        invalidation = structure["resistance"]
-        target = structure["support"]
+        invalidation = structure.get("resistance")
+        target = structure.get("support")
         target_source = "mean reversion (no R:RR target — this hypothesis expects a bounce, not a sized trade)"
         do_nothing_if = "No confirmation within the next 1-2 bars — this hypothesis expects mean reversion, not continuation."
     else:  # range bound
@@ -329,10 +364,32 @@ def build_report(
     # hypothesis targets mean reversion, not a sized R:RR trade.
     risk_reward_ratio = None
     if direction in ("LONG", "SHORT") and invalidation is not None and target is not None:
-        risk_amount = abs(last_close - invalidation)
-        reward_amount = abs(target - last_close)
-        if risk_amount > 0:
-            risk_reward_ratio = round(reward_amount / risk_amount, 2)
+        # Enforce geometric validity before publishing R:R
+        long_ok = direction == "LONG" and invalidation < last_close and target > last_close
+        short_ok = direction == "SHORT" and invalidation > last_close and target < last_close
+        if long_ok or short_ok:
+            risk_amount = abs(last_close - invalidation)
+            reward_amount = abs(target - last_close)
+            if risk_amount > 0 and reward_amount > 0:
+                risk_reward_ratio = round(reward_amount / risk_amount, 2)
+                # Ultra-low R:R is not a trade — demote to WAIT
+                if risk_reward_ratio < 0.8:
+                    direction = "WAIT"
+                    bias = f"{bias} (R:R too low)"
+                    do_nothing_if = (
+                        f"Computed R:R 1:{risk_reward_ratio:.2f} is below minimum — "
+                        "levels do not justify a directional trade."
+                    )
+                    risk_reward_ratio = None
+        else:
+            # Inverted levels — never publish as a trade
+            direction = "WAIT"
+            bias = "Cautious (inverted levels)"
+            risk_reward_ratio = None
+            do_nothing_if = (
+                "Entry / invalidation / target geometry is invalid for the "
+                "suggested direction — no trade."
+            )
 
     what_changed = winner.supporting[0] if winner.supporting else "No single dominant signal this cycle."
 

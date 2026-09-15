@@ -37,7 +37,21 @@ def maybe_execute(report: dict) -> dict:
     result = {"executed": False, "reason": None, "execution_id": None}
 
     if not settings.execution_enabled:
-        return _record(report, status="skipped", skip_reason="EXECUTION_ENABLED=false", result=result)
+        return _record(report, status="skipped", skip_reason="EXECUTION_ENABLED=false (master switch)", result=result)
+
+    # Runtime opt-in (Telegram / dashboard toggle). Default off so users are
+    # never forced into live orders just because the server master switch is on.
+    try:
+        from app.preferences import is_execution_opted_in
+        if not is_execution_opted_in():
+            return _record(
+                report,
+                status="skipped",
+                skip_reason="execution opt-in is OFF (enable from Telegram: /execution on)",
+                result=result,
+            )
+    except Exception as exc:
+        return _record(report, status="skipped", skip_reason=f"preference check failed: {exc}", result=result)
 
     direction = report.get("direction")
     if direction not in ("LONG", "SHORT"):
