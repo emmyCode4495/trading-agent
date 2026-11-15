@@ -18,10 +18,13 @@ export interface Opportunity {
 
 export interface ScanLatest {
   scan_id?: number
+  scan_run_id?: number
   created_at?: string
+  finished_at?: string
+  error?: string | null
   markets_discovered?: number
   markets_screened?: number
-  symbols_analyzed?: number
+  symbols_analyzed?: string[] | number
   opportunities: Opportunity[]
   duration_seconds?: number
 }

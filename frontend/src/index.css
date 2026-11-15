@@ -1,41 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
-
 @theme {
-  --color-bg: #0a0b0f;
-  --color-panel: #111318;
-  --color-panel-border: #1c1f2a;
-  --color-text: #e8eaef;
-  --color-text-mid: #9ba3b5;
-  --color-text-dim: #5c6578;
-  --color-bull: #22c55e;
-  --color-bear: #ef4444;
-  --color-amber: #f59e0b;
-  --color-amber-dim: #92400e;
-  --color-accent: #3b82f6;
-  --font-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
-  --font-display: "Space Mono", "IBM Plex Mono", ui-monospace, monospace;
+ --color-bg:#090d13; --color-panel:#111822; --color-panel-border:#26303d;
+ --color-text:#e9edf2; --color-text-mid:#a4b0c0; --color-text-dim:#778597;
+ --color-bull:#35c69a; --color-bear:#f17c81; --color-amber:#e6b96c;
+ --color-accent:#a6c8ff; --font-mono:"IBM Plex Mono",monospace;
+ --font-display:"DM Sans",sans-serif;
 }
-
-html, body, #root {
-  height: 100%;
-  margin: 0;
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: Inter, system-ui, -apple-system, sans-serif;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #2a2f3d;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #3a4050;
-}
+:root{color-scheme:dark}*{box-sizing:border-box}html,body,#root{min-height:100%;margin:0}body{background:var(--color-bg);color:var(--color-text);font-family:"DM Sans",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}button,input,select{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--color-accent);outline-offset:3px}::selection{background:#385577;color:#fff}::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#344153;border-radius:8px}table{font-variant-numeric:tabular-nums}tbody tr{transition:background .15s ease}tbody tr:hover{background:#ffffff07}th{white-space:nowrap}h1,h2,h3{letter-spacing:-.035em}input::placeholder{color:#657488}@media(max-width:700px){table{min-width:720px}}

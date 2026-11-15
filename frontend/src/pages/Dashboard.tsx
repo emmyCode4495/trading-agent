@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw, Play, TrendingUp, Target, AlertTriangle } from 'lucide-react'
 import { api } from '../api/client'
+import { useAuth } from '../stores/auth'
 import type { ScanLatest, Status, Calibration, Position } from '../types'
 import { DirectionBadge, LiveDot } from '../components/StatusBadge'
 import { formatPrice, formatPct, relativeTime } from '../lib/format'
 import clsx from 'clsx'
+import { supabase } from '../lib/supabase'
+import { AuthPanel } from '../components/AuthPanel'
 
 export function Dashboard() {
+  const token = useAuth(s => s.token)
+  const user = useAuth(s => s.user)
   const [status, setStatus] = useState<Status | null>(null)
   const [scan, setScan] = useState<ScanLatest | null>(null)
   const [calibration, setCalibration] = useState<Calibration | null>(null)
@@ -36,12 +41,22 @@ export function Dashboard() {
   }
 
   useEffect(() => {
+    if (!token) { setLoading(false); return }
+    setLoading(true)
     load()
-    const id = setInterval(load, 15_000)
-    return () => clearInterval(id)
-  }, [])
+    const id = setInterval(load, 30_000)
+    if (supabase) {
+      const channel = supabase.channel('agent-scans').on('postgres_changes',
+        {event:'INSERT', schema:'public', table:'agent_events'}, () => { void load() }).subscribe()
+      return () => { clearInterval(id); void supabase.removeChannel(channel) }
+    }
+    const stream = new EventSource(`${import.meta.env.VITE_API_URL || ''}/api/stream`)
+    stream.addEventListener('update', () => { void load() })
+    return () => { clearInterval(id); stream.close() }
+  }, [token])
 
   const runScan = async () => {
+    if (!token) { setError('Sign in under Connections to start a scan.'); return }
     setScanning(true)
     try {
       const result = await api.runScan()
@@ -53,6 +68,8 @@ export function Dashboard() {
       setScanning(false)
     }
   }
+
+  if (!token) return <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-8"><div className="text-center space-y-3"><p className="text-xs uppercase tracking-[.2em] text-[#bfd4f0]">Aether / Overview</p><h1 className="text-3xl font-semibold">Your trading intelligence workspace</h1><p className="text-[var(--color-text-mid)] max-w-2xl mx-auto">Register or sign in to access your account. Market intelligence, automated demo execution, and subscriptions are available only according to your account permissions.</p></div><AuthPanel/></div>
 
   if (loading) {
     return (
@@ -67,9 +84,9 @@ export function Dashboard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Trading overview</h1>
           <p className="text-sm text-[var(--color-text-mid)] mt-0.5">
-            Live opportunities across Bybit · MEXC · Binance
+            {user?.display_name || user?.email} · Market intelligence / multi-exchange signal monitoring
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -97,6 +114,7 @@ export function Dashboard() {
         </div>
       )}
 
+      {scan?.error && <div role="alert" className="rounded-lg border border-[var(--color-amber)]/30 bg-[var(--color-amber)]/10 px-4 py-3 text-sm text-[var(--color-amber)]">Latest scan reported an issue: {scan.error}</div>}
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
@@ -112,7 +130,7 @@ export function Dashboard() {
         />
         <StatCard
           label="Last scan analyzed"
-          value={String(scan?.symbols_analyzed ?? '—')}
+          value={String(Array.isArray(scan?.symbols_analyzed) ? scan.symbols_analyzed.length : (scan?.symbols_analyzed ?? '—'))}
           sub={scan?.markets_discovered ? `${scan.markets_discovered} discovered` : undefined}
           icon={<ActivityIcon />}
         />
@@ -128,7 +146,7 @@ export function Dashboard() {
         <div className="px-5 py-3.5 border-b border-[var(--color-panel-border)] flex items-center justify-between">
           <h2 className="text-sm font-medium">Top opportunities</h2>
           <span className="text-xs text-[var(--color-text-dim)]">
-            Ranked by confidence · min {60}% to act
+            Ranked by confidence · analytical signals only
           </span>
         </div>
         <div className="overflow-x-auto">
