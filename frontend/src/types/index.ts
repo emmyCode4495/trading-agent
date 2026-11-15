@@ -35,6 +35,7 @@ export interface Market {
   quote_volume_24h: number
   price_change_pct_24h: number
   exchange?: string
+  passed_screen?: boolean
 }
 
 export interface Position {

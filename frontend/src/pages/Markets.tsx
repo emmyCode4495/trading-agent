@@ -7,27 +7,49 @@ import clsx from 'clsx'
 
 export function Markets() {
   const [markets, setMarkets] = useState<Market[]>([])
+  const [meta, setMeta] = useState<{ total_discovered: number; total_screened: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<'volume' | 'change'>('volume')
 
   useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
     api
       .markets('USDT')
-      .then(setMarkets)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false))
+      .then((res) => {
+        if (cancelled) return
+        // Backend returns { quote_asset, total_discovered, total_screened, markets: [...] }
+        const list = Array.isArray(res?.markets) ? res.markets : Array.isArray(res) ? res : []
+        setMarkets(list)
+        setMeta({
+          total_discovered: res?.total_discovered ?? list.length,
+          total_screened: res?.total_screened ?? list.length,
+        })
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e?.message || 'Failed to load markets')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const filtered = useMemo(() => {
-    let list = markets
+    let list = Array.isArray(markets) ? markets : []
     if (query.trim()) {
       const q = query.toUpperCase()
       list = list.filter(
         (m) =>
-          m.symbol.includes(q) ||
-          m.base_asset.includes(q) ||
+          (m.symbol || '').toUpperCase().includes(q) ||
+          (m.base_asset || '').toUpperCase().includes(q) ||
           (m.exchange || '').toUpperCase().includes(q)
       )
     }
@@ -44,6 +66,12 @@ export function Markets() {
           <h1 className="text-xl font-semibold tracking-tight">Markets</h1>
           <p className="text-sm text-[var(--color-text-mid)] mt-0.5">
             Unified pairs from Bybit, MEXC & Binance
+            {meta && (
+              <span className="text-[var(--color-text-dim)]">
+                {' '}
+                · {meta.total_discovered} discovered · {meta.total_screened} above liquidity screen
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -95,16 +123,18 @@ export function Markets() {
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-5 py-12 text-center text-[var(--color-text-dim)]">
-                    No markets match your filter.
+                    {error ? 'Could not load markets.' : 'No markets match your filter.'}
                   </td>
                 </tr>
               ) : (
-                filtered.slice(0, 150).map((m) => (
+                filtered.slice(0, 150).map((m, i) => (
                   <tr
-                    key={`${m.exchange || 'cex'}-${m.symbol}`}
+                    key={`${m.exchange || 'cex'}-${m.symbol}-${i}`}
                     className="border-b border-[var(--color-panel-border)]/50 hover:bg-white/[0.02]"
                   >
-                    <td className="px-5 py-2.5 font-[var(--font-mono)] font-medium">{m.symbol}</td>
+                    <td className="px-5 py-2.5 font-[var(--font-mono)] font-medium">
+                      {m.symbol}
+                    </td>
                     <td className="px-4 py-2.5">
                       <span className="text-xs px-2 py-0.5 rounded bg-white/5 text-[var(--color-text-mid)] capitalize">
                         {m.exchange || '—'}
@@ -126,7 +156,9 @@ export function Markets() {
                     <td className="px-4 py-2.5 text-right font-[var(--font-mono)] text-[var(--color-text-mid)]">
                       {formatVolume(m.quote_volume_24h)}
                     </td>
-                    <td className="px-4 py-2.5 text-[var(--color-text-dim)] text-xs">{m.status}</td>
+                    <td className="px-4 py-2.5 text-[var(--color-text-dim)] text-xs">
+                      {m.status || '—'}
+                    </td>
                   </tr>
                 ))
               )}
