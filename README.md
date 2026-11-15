@@ -1,3 +1,12 @@
+# Aether — Live Multi-Exchange Trading Bot
+
+> **Status**: Overhaul in progress. Intelligence layer (agents + scanner) is live.  
+> New React web frontend is under `frontend/`. Multi-user + multi-CEX execution and Expo mobile are next.
+
+See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the full hybrid (Web + Expo) design.
+
+---
+
 # Market Intelligence Agent
 
 An autonomous, multi-agent market-intelligence system. It doesn't wait to be
